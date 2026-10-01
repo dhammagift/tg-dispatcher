@@ -1,80 +1,80 @@
 # tg-dispatcher
 
-Несколько Telegram-ботов, за каждым — своя сессия Claude Code. Боты отвечают в личке и в общей группе.
+Several Telegram bots, each driven by its own Claude Code session. The bots answer in private chats and in a shared group.
 
-## Как устроено
+## How it works
 
-- **Бот = роль.** У роли своя папка `roles/<роль>/`: там `.env` с токеном бота, `CLAUDE.md` (имя бота и правила поведения) и состояние Telegram-плагина (пара, allowlist, входящие файлы).
-- **Связь с Telegram** — официальный плагин `plugin:telegram@claude-plugins-official` (MCP-сервер на bun). Он получает сообщения бота и передаёт их в сессию как `<channel>`. Отвечает сессия инструментом `reply`.
-- **`dispatcher.sh`** держит одну tmux-сессию `tg`, в ней по окну на роль, и в каждом окне `claude --channels plugin:telegram…`. Какой роли какая папка соответствует, записано в `roles.json`.
-- **Голосовые** (патч плагина, `plugin-patch/`) распознаются через Groq Whisper до того, как сообщение попадёт в сессию. Бот сразу отвечает на голосовое текстом «🎤 …», чтобы отправитель видел, что именно распознано.
+- **A bot is a role.** Each role has its own folder `roles/<role>/`: a `.env` with the bot token, a `CLAUDE.md` (the bot's name and behaviour rules) and the Telegram plugin's state (pairing, allowlist, received files).
+- **Telegram link** — the official plugin `plugin:telegram@claude-plugins-official` (an MCP server running on bun). It receives the bot's messages and hands them to the session as `<channel>` notifications. The session answers with the `reply` tool.
+- **`dispatcher.sh`** keeps one tmux session `tg` with one window per role, each window running `claude --channels plugin:telegram…`. `roles.json` maps each role to its folder.
+- **Voice messages** (plugin patch, `plugin-patch/`) are transcribed with Groq Whisper before the message reaches the session. The bot immediately replies to the voice note with "🎤 …", so the sender sees exactly what was heard.
 
 ```
-Telegram ──> бот @x_bot ──> plugin:telegram (bun, MCP) ──> claude в tmux-окне "x"
+Telegram ──> bot @x_bot ──> plugin:telegram (bun, MCP) ──> claude in tmux window "x"
                                    ^                              │
                                    └──────── reply(chat_id) ──────┘
 ```
 
-## Требования
+## Requirements
 
-- Linux, `tmux`, `jq`, `bun`, Claude Code (`claude`) с подпиской или ключом.
-- Плагин Telegram: в Claude Code выполнить `/plugin install telegram@claude-plugins-official`.
-- Для голосовых — ключ Groq (бесплатный): https://console.groq.com/keys
+- Linux, `tmux`, `jq`, `bun`, Claude Code (`claude`) with a subscription or an API key.
+- The Telegram plugin: in Claude Code run `/plugin install telegram@claude-plugins-official`.
+- For voice messages — a (free) Groq key: https://console.groq.com/keys
 
-## Быстрый старт
+## Quick start
 
 ```bash
 git clone git@github.com:dhammagift/tg-dispatcher.git /root/tg-dispatcher
 cd /root/tg-dispatcher
-cp roles.example.json roles.json          # пропиши свои роли и пути
+cp roles.example.json roles.json          # put your roles and paths here
 ```
 
-Новая роль (бот) — подробно в [SETUP.md](SETUP.md):
+New role (bot) — step by step in [SETUP.md](SETUP.md):
 
-1. В Telegram у [@BotFather](https://t.me/BotFather): `/newbot` → получить токен.
-2. Создать папку роли и файл `.env`:
+1. In Telegram, at [@BotFather](https://t.me/BotFather): `/newbot` → get the token.
+2. Create the role folder and its `.env`:
    ```bash
    ROLE=mybot
    mkdir -p roles/$ROLE && chmod 700 roles/$ROLE
    printf 'TELEGRAM_BOT_TOKEN=123:AA...\nGROQ_TOKEN=gsk_...\n' > roles/$ROLE/.env
    chmod 600 roles/$ROLE/.env
-   cp roles/example/CLAUDE.md roles/$ROLE/   # поменять имя бота внутри
+   cp roles/example/CLAUDE.md roles/$ROLE/   # change the bot's name inside
    ```
-3. Добавить роль в `roles.json` (`project_dir` и `state_dir` — обе на `roles/$ROLE`).
-4. Запустить: `./dispatcher.sh start $ROLE`.
-5. Спарить: написать боту в личку. В `./dispatcher.sh logs $ROLE` появится код. Затем `./dispatcher.sh attach`, выбрать окно (`Ctrl+B w`) и выполнить `/telegram:access pair <код>`, потом `/telegram:access policy allowlist`.
+3. Add the role to `roles.json` (`project_dir` and `state_dir` both point to `roles/$ROLE`).
+4. Start it: `./dispatcher.sh start $ROLE`.
+5. Pair: send the bot a private message. A code appears in `./dispatcher.sh logs $ROLE`. Then `./dispatcher.sh attach`, pick the window (`Ctrl+B w`) and run `/telegram:access pair <code>`, then `/telegram:access policy allowlist`.
 
-## Несколько ботов в одной группе
+## Several bots in one group
 
-1. Добавить каждого бота в группу и **сделать администратором**: иначе бот видит только команды и ответы на свои сообщения. Вместо этого можно выключить privacy у BotFather (`/setprivacy` → Disable).
-2. В сессии каждого бота: `/telegram:access group add -100XXXXXXXXXX --no-mention`. ID группы виден в логе роли при первом сообщении из неё.
-3. Боты друг друга не слышат: по правилам Bot API бот не получает сообщения других ботов. Общаются боты через людей. На случай, если сообщение бота всё же придёт, в `CLAUDE.md` роли есть **loop-guard**: не отвечать ботам без прямого вопроса или упоминания, чтобы не было бесконечной переписки.
-4. Обращаться к конкретному боту — через @упоминание.
+1. Add every bot to the group and **make it an admin**: otherwise a bot only sees commands and replies to its own messages. Alternatively turn privacy off at BotFather (`/setprivacy` → Disable).
+2. In each bot's session: `/telegram:access group add -100XXXXXXXXXX --no-mention`. The group id shows up in the role's log on the first message from that group.
+3. Bots do not hear each other: under the Bot API rules a bot does not receive messages from other bots. Bots talk through people. In case a bot's message does arrive, each role's `CLAUDE.md` has a **loop-guard**: never answer a bot unless directly asked or mentioned, so bots don't end up in an endless exchange.
+4. Address a specific bot with an @mention.
 
-## Команды
+## Commands
 
 ```bash
-./dispatcher.sh start <роль>               # новая сессия Claude под ролью
-./dispatcher.sh assign <роль> <session-id> # продолжить существующую сессию (claude --resume)
-./dispatcher.sh stop <роль>
-./dispatcher.sh status [роль]
-./dispatcher.sh logs <роль>                # tail session.log
-./dispatcher.sh attach                     # tmux attach -t tg; Ctrl+B w — окна, Ctrl+B d — отключиться
+./dispatcher.sh start <role>               # fresh Claude session under this role
+./dispatcher.sh assign <role> <session-id> # resume an existing session (claude --resume)
+./dispatcher.sh stop <role>
+./dispatcher.sh status [role]
+./dispatcher.sh logs <role>                # tail session.log
+./dispatcher.sh attach                     # tmux attach -t tg; Ctrl+B w — windows, Ctrl+B d — detach
 ```
 
-Сессии запускаются с `--permission-mode auto`: на запрос разрешения в headless-режиме ответить некому. Режим auto пропускает обычные действия, а рискованные (например, выкатку на прод) блокирует классификатором.
+Sessions run with `--permission-mode auto`: nobody is there to answer a permission prompt in a headless session. Auto mode lets ordinary actions through and blocks risky ones (a production deploy, for example) with a classifier.
 
-## Патч голосовых сообщений
+## Voice message patch
 
-Плагин вендорится в `~/.claude/plugins/cache/claude-plugins-official/telegram/<версия>/`. Патч для `server.ts`:
+The plugin is vendored into `~/.claude/plugins/cache/claude-plugins-official/telegram/<version>/`. The patch for `server.ts`:
 
 ```bash
 cd ~/.claude/plugins/cache/claude-plugins-official/telegram/*/
 patch -p1 < /root/tg-dispatcher/plugin-patch/telegram-voice.patch
 ```
 
-После `claude plugin update telegram` патч нужно наложить заново. Изменения подхватываются после перезапуска сессии (`./dispatcher.sh assign <роль> <session-id>`). `GROQ_TOKEN` берётся из `.env` роли.
+Re-apply it after `claude plugin update telegram`. The change takes effect once the session restarts (`./dispatcher.sh assign <role> <session-id>`). `GROQ_TOKEN` is read from the role's `.env`.
 
-## Что не в репозитории
+## Not in the repository
 
-`roles.json`, `roles/*/.env`, `access.json`, `inbox/`, логи — это токены и состояние конкретного сервера (см. `.gitignore`).
+`roles.json`, `roles/*/.env`, `access.json`, `inbox/`, logs — these are tokens and the state of a particular server (see `.gitignore`).

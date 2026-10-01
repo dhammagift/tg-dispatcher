@@ -1,29 +1,30 @@
-# Добавление новой роли (нового бота)
+# Adding a new role (a new bot)
 
-Для агента/человека, у которого на руках токен бота от @BotFather.
+For an agent or a person who has a bot token from @BotFather.
 
-## 1. Придумай имя роли
-Используй настоящий @username бота (без @ и без `_bot`, если хочется короче),
-не придуманное человеком имя — так проще сопоставлять роль с ботом:
+## 1. Pick the role name
+Use the bot's real @username (without the @, and without `_bot` if you want it shorter),
+not a name a person made up — that makes it easy to match a role to its bot:
 `kacchapa`, `cakkhu`, `ariyasacca`, `o28`.
 
-## 2. Одна папка на роль — она же project_dir, она же state_dir
+## 2. One folder per role — it is both project_dir and state_dir
 ```bash
 ROLE=ariyasacca
 mkdir -p /root/tg-dispatcher/roles/$ROLE
 chmod 700 /root/tg-dispatcher/roles/$ROLE
 cat > /root/tg-dispatcher/roles/$ROLE/.env <<EOF
-TELEGRAM_BOT_TOKEN=123456789:AA...   # токен из BotFather, целиком
+TELEGRAM_BOT_TOKEN=123456789:AA...   # the whole token from BotFather
+GROQ_TOKEN=gsk_...                   # optional: voice message transcription
 EOF
 chmod 600 /root/tg-dispatcher/roles/$ROLE/.env
 ```
-Не разносить `.env` и `CLAUDE.md` по разным папкам (раньше так и было — `state_dir`
-отдельно от `project_dir` — и это постоянно приводило к путанице: токен клали не
-туда). Одна папка проще и работает точно так же — плагину всё равно, совпадает
-ли `TELEGRAM_STATE_DIR` с рабочей директорией сессии или нет.
+Don't split `.env` and `CLAUDE.md` into different folders (it used to be like that — `state_dir`
+separate from `project_dir` — and it kept causing confusion: the token ended up in the wrong
+place). One folder is simpler and works exactly the same — the plugin doesn't care whether
+`TELEGRAM_STATE_DIR` matches the session's working directory.
 
-## 3. Зарегистрируй роль в roles.json
-`/root/tg-dispatcher/roles.json`, добавь ключ:
+## 3. Register the role in roles.json
+`/root/tg-dispatcher/roles.json`, add a key:
 ```json
 {
   "ariyasacca": {
@@ -33,68 +34,65 @@ chmod 600 /root/tg-dispatcher/roles/$ROLE/.env
 }
 ```
 
-## 4. Положи CLAUDE.md с identity в ту же папку
-Шаблон — см. любую из существующих ролей (`roles/kacchapa/CLAUDE.md` и т.п.):
-identity ("твоё имя в этом чате — X"), loop-guard (не отвечать ботам, кроме
-как по прямому вопросу/упоминанию), и блок "always reply back to Telegram"
-(обязательно слать ответ через `reply` в исходный chat_id — личка или
-группа, откуда пришло сообщение; иначе ответ уйдёт только в терминал, а не
-собеседнику в Telegram).
+## 4. Put a CLAUDE.md with the identity into the same folder
+Template — `roles/example/CLAUDE.md`: identity ("your name in this chat is X"), the loop-guard
+(don't answer bots except on a direct question or mention), and the "always reply back to
+Telegram" block (the answer must go out through `reply` to the originating chat_id — the private
+chat or the group the message came from; otherwise it only lands in the terminal, not with the
+person in Telegram).
 
-## 5. Запусти
+## 5. Start it
 ```bash
 /root/tg-dispatcher/dispatcher.sh start ariyasacca
 ```
 
-## 6. Спарь бота (только один раз на роль)
+## 6. Pair the bot (once per role)
 ```bash
 /root/tg-dispatcher/dispatcher.sh logs ariyasacca
 ```
-Напиши боту в личку в Telegram — в логах появится 6-значный код пары. Затем:
+Send the bot a private message in Telegram — a 6-character pairing code shows up in the log. Then:
 ```bash
 /root/tg-dispatcher/dispatcher.sh attach   # tmux attach -t tg
 ```
-`Ctrl+B w` — список окон, выбрать роль. Внутри сессии выполни
-`/telegram:access pair <код>`, затем `/telegram:access policy allowlist`
-(иначе любой посторонний, кто напишет боту, получит код пары). Отключись
-через `Ctrl+B d` — сессия продолжит жить, отключается только твой терминал.
+`Ctrl+B w` — window list, pick the role. Inside the session run
+`/telegram:access pair <code>`, then `/telegram:access policy allowlist`
+(otherwise any stranger who messages the bot gets a pairing code). Detach with
+`Ctrl+B d` — the session keeps running, only your terminal disconnects.
 
-## 7. Добавь бота в общую группу
-Дай боту права администратора группы (проще, чем `/setprivacy Disable` в
-BotFather) — иначе бот не увидит сообщения других участников не-в-ответ-на-себя.
-Из его же сессии: `/telegram:access group add -100XXXXXXXXXX --no-mention`.
+## 7. Add the bot to the shared group
+Make the bot a group admin (simpler than `/setprivacy Disable` at BotFather) — otherwise the bot
+doesn't see other members' messages that aren't replies to it.
+From its own session: `/telegram:access group add -100XXXXXXXXXX --no-mention`.
 
-## Замена сессии под ролью (сессия 1 → сессия 4)
+## Replacing the session behind a role (session 1 → session 4)
 ```bash
-/root/tg-dispatcher/dispatcher.sh assign ariyasacca <id-новой-сессии>
+/root/tg-dispatcher/dispatcher.sh assign ariyasacca <new-session-id>
 ```
-Токен, пара, allowlist — уже сохранены, второй раз их не трогаешь.
+Token, pairing, allowlist are already saved — you don't touch them a second time.
 
-## Особенность: новый project_dir первый раз спросит доверие
-Диалог "Do you trust this folder?" для НОВОЙ (ещё не открытой) папки
-зависает навечно — печатать Enter некому. Перед первым `start` на новую
-директорию проверь `~/.claude.json` → `projects."<path>".hasTrustDialogAccepted`,
-и если её там нет — добавь:
+## Gotcha: a new project_dir asks for trust the first time
+The "Do you trust this folder?" dialog for a NEW (never opened) folder hangs forever — there is
+nobody to press Enter. Before the first `start` on a new directory check `~/.claude.json` →
+`projects."<path>".hasTrustDialogAccepted`, and if it isn't there, add it:
 ```bash
 python3 -c "
 import json
 p='/root/.claude.json'
 d=json.load(open(p))
-d['projects'].setdefault('/путь/к/роли', {})['hasTrustDialogAccepted'] = True
+d['projects'].setdefault('/path/to/role', {})['hasTrustDialogAccepted'] = True
 json.dump(d, open(p,'w'), indent=2)
 "
 ```
-Даже с этим флагом диалог иногда всё равно всплывает (не разобрались, почему
-именно) — тогда добить вручную: `tmux send-keys -t tg:<роль> Down Enter`
-(в списке "No, exit" стоит выше "Yes, I trust this folder").
+Even with this flag the dialog sometimes still pops up (not yet understood why) — then finish it
+by hand: `tmux send-keys -t tg:<role> Down Enter` ("No, exit" is listed above
+"Yes, I trust this folder").
 
-## Почему tmux, а не screen
-Раньше был screen с отдельной сессией на роль — работало, но неудобно (много
-имён сессий). Свели в одну screen-сессию с окнами на роль — оказалось, screen
-даёт нормальный pty только ПЕРВОМУ окну сессии; окна, добавленные позже через
-`screen -X screen` в отсоединённую сессию, pty не получают, и `claude` тут же
-падает с `Error: Input must be provided ... --print`, без внятной ошибки в
-логе (окно просто исчезает). Такое творится каждый раз для 2-го и более
-позднего окна независимо от контента. `tmux` устроен иначе (сервер + клиенты)
-и всегда выдаёт полноценный pty каждому окну — проверено, 4 роли на 2
-серверах, все стабильны.
+## Why tmux and not screen
+It used to be screen with a separate session per role — it worked, but was inconvenient (many
+session names). Merging them into one screen session with a window per role turned out to break:
+screen gives a proper pty only to the FIRST window of a session; windows added later via
+`screen -X screen` to a detached session get no pty, and `claude` immediately dies with
+`Error: Input must be provided ... --print`, with no clear error in the log (the window just
+disappears). This happens every time for the 2nd and later windows regardless of content. `tmux`
+works differently (server + clients) and always gives every window a full pty — tested with
+4 roles on 2 servers, all stable.
