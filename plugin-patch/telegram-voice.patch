@@ -1,0 +1,81 @@
+--- a/server.ts
++++ b/server.ts
+@@ -836,15 +836,48 @@
+ 
+ bot.on('message:voice', async ctx => {
+   const voice = ctx.message.voice
+-  const text = ctx.message.caption ?? '(voice message)'
+-  await handleInbound(ctx, text, undefined, {
+-    kind: 'voice',
+-    file_id: voice.file_id,
+-    size: voice.file_size,
+-    mime: voice.mime_type,
+-  })
++  const caption = ctx.message.caption
++  const { text, transcript } = await transcribeVoiceMessage(ctx, voice.file_id, caption)
++  await handleInbound(ctx, text, undefined, undefined, transcript)
+ })
+ 
++// Patched in: transcribe voice notes to text before the model ever sees them,
++// instead of handing over a raw .ogg + instructions to transcribe it. Needs
++// GROQ_TOKEN in this bot's own STATE_DIR/.env (loaded into process.env above,
++// same "real env wins" rule as the token itself). Re-apply after any
++// `claude plugin update telegram` — this file is vendored, not a config hook.
++async function transcribeVoiceMessage(
++  ctx: Context,
++  fileId: string,
++  caption: string | undefined,
++): Promise<{ text: string; transcript?: string }> {
++  const groqToken = process.env.GROQ_TOKEN
++  if (!groqToken) return { text: caption ?? '(voice message — transcription not configured: missing GROQ_TOKEN)' }
++  try {
++    const file = await ctx.api.getFile(fileId)
++    if (!file.file_path) return { text: caption ?? '(voice message — could not fetch file)' }
++    const url = `https://api.telegram.org/file/bot${TOKEN}/${file.file_path}`
++    const res = await fetch(url)
++    const buf = Buffer.from(await res.arrayBuffer())
++    const form = new FormData()
++    form.append('model', 'whisper-large-v3-turbo')
++    form.append('file', new Blob([buf]), 'voice.ogg')
++    const stt = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
++      method: 'POST',
++      headers: { Authorization: `Bearer ${groqToken}` },
++      body: form,
++    })
++    const data: any = await stt.json()
++    if (!stt.ok) throw new Error(data?.error?.message ?? `Groq error ${stt.status}`)
++    const transcript = String(data.text ?? '').trim()
++    if (!transcript) return { text: caption ?? '(voice message — empty transcription)' }
++    return { text: caption ? `${transcript}\n\n(caption: ${caption})` : transcript, transcript }
++  } catch (err) {
++    process.stderr.write(`telegram channel: voice transcription failed: ${err}\n`)
++    return { text: caption ?? '(voice message — transcription failed)' }
++  }
++}
++
+ bot.on('message:audio', async ctx => {
+   const audio = ctx.message.audio
+   const name = safeName(audio.file_name)
+@@ -909,6 +942,7 @@
+   text: string,
+   downloadImage: (() => Promise<string | undefined>) | undefined,
+   attachment?: AttachmentMeta,
++  voiceTranscript?: string,
+ ): Promise<void> {
+   const result = gate(ctx)
+ 
+@@ -949,6 +983,14 @@
+     return
+   }
+ 
++  // Patched in: echo a voice note's transcript back to the sender (as a reply to the voice message), so
++  // they can see what was actually heard instead of guessing. Only after gate(): strangers get nothing.
++  if (voiceTranscript) {
++    await bot.api.sendMessage(chat_id, `🎤 ${voiceTranscript.slice(0, 4000)}`, msgId != null
++      ? { reply_parameters: { message_id: msgId, allow_sending_without_reply: true } }
++      : {}).catch(err => process.stderr.write(`telegram channel: transcript echo failed: ${err}\n`))
++  }
++
+   // Typing indicator — signals "processing" until we reply (or ~5s elapses).
+   void bot.api.sendChatAction(chat_id, 'typing').catch(() => {})
+ 

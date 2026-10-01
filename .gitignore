@@ -1,0 +1,8 @@
+# Secrets and per-bot state — never commit
+roles.json
+roles/*/.env
+roles/*/access.json
+roles/*/inbox/
+roles/*/session.log
+roles/*/approved/
+*.env
